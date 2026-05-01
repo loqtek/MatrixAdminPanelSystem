@@ -1,0 +1,121 @@
+# Docker Compose configuration for Matrix Admin Panel System (MAPS)
+# This file orchestrates the frontend and backend containers
+
+services:
+  # Backend Service - FastAPI application
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: maps-backend
+    restart: unless-stopped
+    ports:
+      # Map container port 8000 to host port 8000
+      # Access backend API at http://localhost:8000
+      - "8000:8000"
+    extra_hosts:
+      # Allow container to access host services via host.docker.internal
+      # This enables the backend to reach Matrix server at 127.0.0.1:8008 on the host
+      - "host.docker.internal:host-gateway"
+    environment:
+      # DATABASE_URL in .env is for local uvicorn; Compose uses DOCKER_DATABASE_URL so a host
+      # sqlite:///./maps.db does not override the container path or the sqlite_data volume.
+      # For PostgreSQL in Docker: set DOCKER_DATABASE_URL=postgresql://...
+      - DATABASE_URL=${DOCKER_DATABASE_URL:-sqlite:///./sqlite_data/maps.db}
+      
+      # Secret key for JWT token encryption
+      # Generate a secure key: openssl rand -hex 32
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-change-this}
+      
+      # CORS origins - allow frontend to make requests
+      # Comma-separated list of allowed origins
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      
+      # Matrix Synapse server URL
+      # For accessing host Matrix server from container, use host.docker.internal
+      # Example: http://host.docker.internal:8008 (for host Matrix server)
+      # Example: https://matrix.example.com (for external Matrix server)
+      - MATRIX_SERVER_URL=${MATRIX_SERVER_URL:-http://host.docker.internal:8008}
+    volumes:
+      # Mount a directory so maps.db is a real file (never bind-mount a non-existent file path).
+      # For PostgreSQL, remove this volume and use the db service below
+      - ./backend/sqlite_data:/app/sqlite_data
+      
+      # Mount config and log file directories if needed
+      # Uncomment and adjust paths as needed:
+      - /etc/matrix-synapse:/etc/matrix-synapse:ro
+      - /var/log/matrix-synapse:/var/log/matrix-synapse:ro
+    networks:
+      - maps-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Frontend Service - Next.js application
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Same-origin /api proxy; leave empty. Rewrites target the backend container.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+        BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:8000}
+    container_name: maps-frontend
+    restart: unless-stopped
+    ports:
+      # Map container port 3000 to host port 3000
+      # Access frontend at http://localhost:3000
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-}
+      # Must match backend SECRET_KEY (Next.js middleware verifies JWTs)
+      - JWT_SECRET=${SECRET_KEY}
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - maps-network
+    healthcheck:
+      test: ["CMD", "bun", "-e", "require('http').get('http://localhost:3000', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # PostgreSQL Database (Optional)
+  # Uncomment this service if you want to use PostgreSQL instead of SQLite
+  # Make sure to update DATABASE_URL in backend environment to:
+  # postgresql://maps_user:maps_password@db:5432/maps_db
+  #
+  # db:
+  #   image: postgres:16-alpine
+  #   container_name: maps-db
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: ${POSTGRES_USER:-maps_user}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-maps_password}
+  #     POSTGRES_DB: ${POSTGRES_DB:-maps_db}
+  #   volumes:
+  #     # Persist database data
+  #     - postgres_data:/var/lib/postgresql/data
+  #   networks:
+  #     - maps-network
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-maps_user}"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+# Docker network for service communication
+networks:
+  maps-network:
+    driver: bridge
+
+# Volumes for persistent data
+# Uncomment if using PostgreSQL
+# volumes:
+#   postgres_data:
+
