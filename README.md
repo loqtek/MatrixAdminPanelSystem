@@ -1,3 +1,8 @@
+
+<p align="center">
+  <img src="public/mapsLogoNoBg1.png" alt="Matrix Admin Panel System (MAPS) logo" width="120" />
+</p>
+
 # Matrix Admin Panel System (MAPS)
 
 A clean and simple admin panel for Matrix Synapse that uses the Admin API for all interactions.
