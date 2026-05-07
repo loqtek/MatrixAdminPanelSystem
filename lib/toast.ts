@@ -21,40 +21,47 @@ export const showToast = {
   },
 };
 
-export const formatError = (error: any): string => {
+function getStringField(obj: Record<string, unknown>, key: string): string | undefined {
+  const v = obj[key];
+  return typeof v === 'string' ? v : undefined;
+}
+
+export function formatError(error: unknown): string {
   if (typeof error === 'string') {
     return error;
   }
-  
-  if (error?.message) {
-    // Try to parse Matrix API error format
-    if (error.message.includes('{') && error.message.includes('errcode')) {
+
+  if (error instanceof Error) {
+    const msg = error.message;
+    if (msg.includes('{') && msg.includes('errcode')) {
       try {
-        const errorMatch = error.message.match(/\{.*\}/);
+        const errorMatch = msg.match(/\{.*\}/);
         if (errorMatch) {
-          const errorObj = JSON.parse(errorMatch[0]);
-          if (errorObj.error) {
-            return errorObj.error;
-          }
-          if (errorObj.errcode) {
-            return `${errorObj.errcode}: ${errorObj.error || 'Unknown error'}`;
+          const errorObj = JSON.parse(errorMatch[0]) as unknown;
+          if (errorObj && typeof errorObj === 'object') {
+            const o = errorObj as Record<string, unknown>;
+            if (typeof o.error === 'string') {
+              return o.error;
+            }
+            if (typeof o.errcode === 'string') {
+              const errText = typeof o.error === 'string' ? o.error : 'Unknown error';
+              return `${o.errcode}: ${errText}`;
+            }
           }
         }
-      } catch (e) {
+      } catch {
         // If parsing fails, continue with original message
       }
     }
-    return error.message;
+    return msg;
   }
-  
-  if (error?.detail) {
-    return error.detail;
-  }
-  
-  if (error?.error) {
-    return error.error;
-  }
-  
-  return 'An unexpected error occurred';
-};
 
+  if (error && typeof error === 'object') {
+    const o = error as Record<string, unknown>;
+    const fromFields =
+      getStringField(o, 'message') ?? getStringField(o, 'detail') ?? getStringField(o, 'error');
+    if (fromFields) return fromFields;
+  }
+
+  return 'An unexpected error occurred';
+}

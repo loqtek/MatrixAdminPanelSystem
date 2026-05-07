@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 type Theme = 'light' | 'dark' | 'system';
 
@@ -8,21 +8,9 @@ export function useTheme() {
   const [theme, setTheme] = useState<Theme>('system');
   const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light');
 
-  useEffect(() => {
-    // Get theme from localStorage or default to system
-    const stored = localStorage.getItem('theme') as Theme | null;
-    const initialTheme = stored || 'system';
-    setTheme(initialTheme);
-    applyTheme(initialTheme);
-  }, []);
-
-  useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
-
-  const applyTheme = (newTheme: Theme) => {
+  const applyTheme = useCallback((newTheme: Theme) => {
     const root = document.documentElement;
-    
+
     if (newTheme === 'system') {
       const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
       root.setAttribute('data-theme', systemTheme);
@@ -31,14 +19,24 @@ export function useTheme() {
       root.setAttribute('data-theme', newTheme);
       setResolvedTheme(newTheme);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('theme') as Theme | null;
+    const initialTheme = stored || 'system';
+    setTheme(initialTheme);
+    applyTheme(initialTheme);
+  }, [applyTheme]);
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme, applyTheme]);
 
   const setThemeMode = (newTheme: Theme) => {
     setTheme(newTheme);
     localStorage.setItem('theme', newTheme);
   };
 
-  // Listen for system theme changes
   useEffect(() => {
     if (theme === 'system') {
       const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
@@ -48,8 +46,7 @@ export function useTheme() {
       mediaQuery.addEventListener('change', handleChange);
       return () => mediaQuery.removeEventListener('change', handleChange);
     }
-  }, [theme]);
+  }, [theme, applyTheme]);
 
   return { theme, resolvedTheme, setTheme: setThemeMode };
 }
-

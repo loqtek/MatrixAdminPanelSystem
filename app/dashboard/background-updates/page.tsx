@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { apiClient, BackgroundUpdatesStatus, BackgroundUpdateInfo } from '@/lib/api';
+import { apiClient, BackgroundUpdatesStatus } from '@/lib/api';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
@@ -26,8 +26,8 @@ export default function BackgroundUpdatesPage() {
       setError('');
       const data = await apiClient.getBackgroundUpdatesStatus();
       setStatus(data);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load background updates status');
+    } catch (err: unknown) {
+      setError(formatError(err));
       showToast.error(formatError(err));
     } finally {
       setLoading(false);
@@ -43,7 +43,7 @@ export default function BackgroundUpdatesPage() {
       await apiClient.setBackgroundUpdatesEnabled(newEnabled);
       await loadStatus();
       showToast.success(`Background updates ${newEnabled ? 'enabled' : 'disabled'}`);
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     } finally {
       setUpdating(false);
@@ -56,7 +56,7 @@ export default function BackgroundUpdatesPage() {
       await apiClient.startBackgroundJob(jobName);
       await loadStatus();
       showToast.success(`Background job "${jobName}" started successfully`);
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     } finally {
       setStartingJob(null);

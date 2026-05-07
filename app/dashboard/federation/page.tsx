@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { apiClient, FederationDestination, FederationDestinationRoom } from '@/lib/api';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/Button';
@@ -28,11 +28,7 @@ export default function FederationPage() {
   const [roomsLoading, setRoomsLoading] = useState(false);
   const [resetting, setResetting] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadDestinations();
-  }, [currentPage, orderBy, dir]);
-
-  const loadDestinations = async () => {
+  const loadDestinations = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
@@ -41,13 +37,17 @@ export default function FederationPage() {
       setDestinations(response.destinations || []);
       setTotal(response.total || 0);
       setNextToken(response.next_token || null);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load federation destinations');
+    } catch (err: unknown) {
+      setError(formatError(err));
       showToast.error(formatError(err));
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, pageSize, orderBy, dir]);
+
+  useEffect(() => {
+    void loadDestinations();
+  }, [loadDestinations]);
 
   const loadDestinationRooms = async (destination: string) => {
     try {
@@ -55,7 +55,7 @@ export default function FederationPage() {
       const response = await apiClient.getFederationDestinationRooms(destination, 0, 100);
       setDestinationRooms(response.rooms || []);
       setSelectedDestination(destinations.find(d => d.destination === destination) || null);
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     } finally {
       setRoomsLoading(false);
@@ -72,7 +72,7 @@ export default function FederationPage() {
       await apiClient.resetFederationConnection(destination);
       showToast.success(`Connection reset for ${destination}`);
       await loadDestinations();
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     } finally {
       setResetting(null);

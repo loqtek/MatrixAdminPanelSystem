@@ -42,7 +42,7 @@ export default function LoginPage() {
       });
       showToast.success('Login successful');
       router.push('/dashboard');
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     } finally {
       setLoading(false);

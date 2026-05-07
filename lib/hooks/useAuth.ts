@@ -13,10 +13,9 @@ export function useAuth() {
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        // Try to get current user - this will use the HttpOnly cookie automatically
         await apiClient.getCurrentUser();
         setAuthenticated(true);
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('Auth check failed:', error);
         removeAccessToken();
         router.push('/login');
@@ -24,8 +23,8 @@ export function useAuth() {
         setLoading(false);
       }
     };
-    
-    checkAuth();
+
+    void checkAuth();
   }, [router]);
 
   const logout = async () => {
@@ -35,4 +34,3 @@ export function useAuth() {
 
   return { authenticated, loading, logout };
 }
-

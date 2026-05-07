@@ -216,6 +216,34 @@ export interface MatrixRoomsResponse {
   total?: number;
 }
 
+/** Synapse-style /messages chunk entry (subset of fields the UI uses). */
+export interface MatrixRoomEvent {
+  type?: string;
+  content?: Record<string, unknown>;
+  event_id?: string;
+  sender?: string;
+  origin_server_ts?: number;
+  state_key?: string;
+  redacts?: string;
+  unsigned?: Record<string, unknown>;
+}
+
+export interface MatrixRoomMessagesResponse {
+  chunk?: MatrixRoomEvent[];
+  start?: string;
+  end?: string;
+  state?: unknown;
+}
+
+/** Room detail payload from MAPS room admin API (subset used by the UI). */
+export interface RoomAdminDetails {
+  room?: Partial<MatrixRoom>;
+  /** Total member count when returned at payload root (admin API). */
+  total_members?: number;
+  members?: string[];
+  state?: MatrixRoomEvent[];
+}
+
 export interface Config {
   id: number;
   name: string;
@@ -271,26 +299,32 @@ class ApiClient {
     }
 
     if (!response.ok) {
-        const errorText = await response.text();
-        let error;
-        try {
-          error = JSON.parse(errorText);
-        } catch {
-          error = { detail: errorText || `HTTP error! status: ${response.status}` };
-        }
-        // Format error message to include Matrix API errors if present
-        let errorMessage = error.detail || error.error || `HTTP error! status: ${response.status}`;
-        if (error.errcode && error.error) {
-          errorMessage = `${error.errcode}: ${error.error}`;
-        }
-        throw new Error(errorMessage);
+      const errorText = await response.text();
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(errorText) as Record<string, unknown>;
+      } catch {
+        parsed = { detail: errorText || `HTTP error! status: ${response.status}` };
+      }
+      const detail = typeof parsed.detail === 'string' ? parsed.detail : undefined;
+      const matrixError = typeof parsed.error === 'string' ? parsed.error : undefined;
+      const errcode = typeof parsed.errcode === 'string' ? parsed.errcode : undefined;
+      let errorMessage = detail || matrixError || `HTTP error! status: ${response.status}`;
+      if (errcode && matrixError) {
+        errorMessage = `${errcode}: ${matrixError}`;
+      }
+      throw new Error(errorMessage);
     }
 
     return response.json();
-    } catch (error: any) {
-      // Network errors or other fetch failures
-      if (error.message === 'Failed to fetch' || error.message.includes('NetworkError')) {
-        throw new Error(`Failed to connect to API at ${API_BASE_URL}. Make sure the backend server is running.`);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        if (error.message === 'Failed to fetch' || error.message.includes('NetworkError')) {
+          throw new Error(
+            `Failed to connect to API at ${API_BASE_URL}. Make sure the backend server is running.`,
+          );
+        }
+        throw error;
       }
       throw error;
     }
@@ -362,21 +396,23 @@ class ApiClient {
     return this.request<MatrixRoom>(`/api/rooms/${encodeURIComponent(roomId)}`);
   }
 
-  async getRoomDetails(roomId: string): Promise<any> {
-    return this.request<any>(`/api/rooms/${encodeURIComponent(roomId)}/details`);
+  async getRoomDetails(roomId: string): Promise<RoomAdminDetails> {
+    return this.request<RoomAdminDetails>(`/api/rooms/${encodeURIComponent(roomId)}/details`);
   }
 
   async getRoomMessages(
     roomId: string,
     fromToken?: string,
     limit?: number,
-    dir: string = 'b'
-  ): Promise<any> {
+    dir: string = 'b',
+  ): Promise<MatrixRoomMessagesResponse> {
     const params = new URLSearchParams();
     if (fromToken) params.append('from_token', fromToken);
     if (limit !== undefined) params.append('limit', limit.toString());
     if (dir) params.append('dir', dir);
-    return this.request<any>(`/api/rooms/${encodeURIComponent(roomId)}/messages?${params.toString()}`);
+    return this.request<MatrixRoomMessagesResponse>(
+      `/api/rooms/${encodeURIComponent(roomId)}/messages?${params.toString()}`,
+    );
   }
 
   async deleteRoom(roomId: string, newRoomUserId?: string): Promise<void> {
@@ -487,8 +523,10 @@ class ApiClient {
     });
   }
 
-  async startBackgroundJob(jobName: 'populate_stats_process_rooms' | 'regenerate_directory'): Promise<any> {
-    return this.request<any>('/api/background-updates/start-job', {
+  async startBackgroundJob(
+    jobName: StartBackgroundJobRequest['job_name'],
+  ): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>('/api/background-updates/start-job', {
       method: 'POST',
       body: JSON.stringify({ job_name: jobName }),
     });
@@ -532,10 +570,13 @@ class ApiClient {
     );
   }
 
-  async resetFederationConnection(destination: string): Promise<any> {
-    return this.request<any>(`/api/federation/destinations/${encodeURIComponent(destination)}/reset-connection`, {
-      method: 'POST',
-    });
+  async resetFederationConnection(destination: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(
+      `/api/federation/destinations/${encodeURIComponent(destination)}/reset-connection`,
+      {
+        method: 'POST',
+      },
+    );
   }
 
   // Statistics

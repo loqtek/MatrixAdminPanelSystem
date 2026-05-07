@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
-import { apiClient, MatrixUser, MatrixUsersResponse, ThreePID, ExternalID } from '@/lib/api';
+import { useEffect, useState, useMemo, useCallback } from 'react';
+import { apiClient, MatrixUser, ThreePID, ExternalID } from '@/lib/api';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -27,28 +27,28 @@ export default function UsersPage() {
   const [currentPage, setCurrentPage] = useState(0);
   const [pageSize] = useState(50);
 
-  useEffect(() => {
-    loadUsers();
-  }, [searchTerm, currentPage]);
-
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     try {
       setLoading(true);
       const response = await apiClient.getUsers(currentPage * pageSize, pageSize, searchTerm || undefined);
       setUsers(response.users || []);
       setTotal(response.total || 0);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load users');
+    } catch (err: unknown) {
+      setError(formatError(err));
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, pageSize, searchTerm]);
+
+  useEffect(() => {
+    void loadUsers();
+  }, [loadUsers]);
 
   const loadUserDetails = async (userId: string) => {
     try {
       const userDetails = await apiClient.getUser(userId);
       setViewingUser(userDetails);
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     }
   };
@@ -77,24 +77,24 @@ export default function UsersPage() {
 
   const totalPages = Math.ceil(total / pageSize);
 
-  const handleAddUser = async (userData: any) => {
+  const handleAddUser = async (userData: Partial<MatrixUser>) => {
     try {
       await apiClient.createUser(userData);
       showToast.success('User created successfully');
       setShowAddModal(false);
       loadUsers();
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     }
   };
 
-  const handleUpdateUser = async (userId: string, userData: any) => {
+  const handleUpdateUser = async (userId: string, userData: Partial<MatrixUser>) => {
     try {
       await apiClient.updateUser(userId, userData);
       showToast.success('User updated successfully');
       setEditingUser(null);
       loadUsers();
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     }
   };
@@ -105,7 +105,7 @@ export default function UsersPage() {
       await apiClient.deactivateUser(userId);
       showToast.success('User deactivated successfully');
       loadUsers();
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     }
   };
@@ -116,7 +116,7 @@ export default function UsersPage() {
       await apiClient.deleteUser(userId);
       showToast.success('User deleted successfully');
       loadUsers();
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     }
   };
@@ -415,6 +415,12 @@ function UserDetailsModal({
   );
 }
 
+type UserFormSavePayload = Partial<MatrixUser> & {
+  password?: string;
+  logout_devices?: boolean;
+  username?: string;
+};
+
 function UserModal({
   user,
   onClose,
@@ -422,7 +428,7 @@ function UserModal({
 }: {
   user?: MatrixUser;
   onClose: () => void;
-  onSave: (data: any) => void;
+  onSave: (data: UserFormSavePayload) => void;
 }) {
   const [username, setUsername] = useState(user?.name?.split(':')[0]?.replace('@', '') || '');
   const [displayname, setDisplayname] = useState(user?.displayname || '');
@@ -438,7 +444,7 @@ function UserModal({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const data: any = {
+    const data: UserFormSavePayload = {
       displayname: displayname || undefined,
       avatar_url: avatarUrl || undefined,
       admin,

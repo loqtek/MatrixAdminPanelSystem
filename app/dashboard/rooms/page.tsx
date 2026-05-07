@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
-import { apiClient, MatrixRoom, MatrixRoomsResponse } from '@/lib/api';
+import { useEffect, useState, useMemo, useCallback } from 'react';
+import { apiClient, MatrixRoom, MatrixRoomEvent, MatrixRoomMessagesResponse, RoomAdminDetails } from '@/lib/api';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -14,6 +14,11 @@ import DOMPurify from 'dompurify';
 
 function safeFormattedHtml(html: string): string {
   return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+}
+
+function strVal(v: unknown, fallback = ''): string {
+  if (v === undefined || v === null || v === '') return fallback;
+  return String(v);
 }
 
 function safeMediaUrl(url: string | undefined): string | undefined {
@@ -39,8 +44,8 @@ export default function RoomsPage() {
   const [currentPage, setCurrentPage] = useState(0);
   const [pageSize] = useState(50);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
-  const [roomDetails, setRoomDetails] = useState<any>(null);
-  const [roomMessages, setRoomMessages] = useState<any>(null);
+  const [roomDetails, setRoomDetails] = useState<RoomAdminDetails | null>(null);
+  const [roomMessages, setRoomMessages] = useState<MatrixRoomMessagesResponse | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -54,35 +59,35 @@ export default function RoomsPage() {
     return 'default';
   };
 
-  const formatMessagePreview = (event: any) => {
+  const formatMessagePreview = (event: MatrixRoomEvent): string => {
     if (event.type !== 'm.room.message') {
-      const content = event.content || {};
-      const target = event.state_key || content?.target_user_id || '';
+      const content = event.content ?? {};
+      const target = strVal(event.state_key) || strVal(content.target_user_id);
 
       if (event.type === 'm.room.member') {
-        const membership = content.membership || 'unknown';
-        const displayName = content.displayname ? ` (${content.displayname})` : '';
+        const membership = strVal(content.membership, 'unknown');
+        const displayName = content.displayname ? ` (${strVal(content.displayname)})` : '';
         return `${membership.toUpperCase()}: ${target || 'unknown user'}${displayName}`;
       }
 
       if (event.type === 'm.room.name') {
-        return `Room name changed to: ${content.name || '(empty)'}`;
+        return `Room name changed to: ${strVal(content.name, '(empty)')}`;
       }
 
       if (event.type === 'm.room.topic') {
-        return `Topic updated: ${content.topic || '(empty)'}`;
+        return `Topic updated: ${strVal(content.topic, '(empty)')}`;
       }
 
       if (event.type === 'm.room.join_rules') {
-        return `Join rule: ${content.join_rule || 'unspecified'}`;
+        return `Join rule: ${strVal(content.join_rule, 'unspecified')}`;
       }
 
       if (event.type === 'm.room.history_visibility') {
-        return `History visibility: ${content.history_visibility || 'unspecified'}`;
+        return `History visibility: ${strVal(content.history_visibility, 'unspecified')}`;
       }
 
       if (event.type === 'm.room.guest_access') {
-        return `Guest access: ${content.guest_access || 'unspecified'}`;
+        return `Guest access: ${strVal(content.guest_access, 'unspecified')}`;
       }
 
       if (event.type === 'm.room.avatar') {
@@ -90,11 +95,12 @@ export default function RoomsPage() {
       }
 
       if (event.type === 'm.room.encryption') {
-        return `Encryption enabled (${content.algorithm || 'algorithm unknown'})`;
+        return `Encryption enabled (${strVal(content.algorithm, 'algorithm unknown')})`;
       }
 
       if (event.type === 'm.room.encrypted') {
-        return `Encrypted message (${formatEncryptionAlgorithm(content.algorithm)})`;
+        const alg = typeof content.algorithm === 'string' ? content.algorithm : undefined;
+        return `Encrypted message (${formatEncryptionAlgorithm(alg)})`;
       }
 
       if (event.type === 'm.room.power_levels') {
@@ -106,12 +112,19 @@ export default function RoomsPage() {
       }
 
       if (event.type === 'm.reaction') {
-        const key = content['m.relates_to']?.key;
+        const relates = content['m.relates_to'];
+        const key =
+          relates &&
+          typeof relates === 'object' &&
+          relates !== null &&
+          'key' in relates
+            ? strVal((relates as { key?: unknown }).key)
+            : '';
         return key ? `Reaction added: ${key}` : 'Reaction added';
       }
 
       if (event.type === 'm.room.create') {
-        return `Room created${content.creator ? ` by ${content.creator}` : ''}`;
+        return `Room created${content.creator ? ` by ${strVal(content.creator)}` : ''}`;
       }
 
       const keys = Object.keys(content);
@@ -121,30 +134,32 @@ export default function RoomsPage() {
       return compact.length > 160 ? `${compact.slice(0, 157)}...` : compact;
     }
 
-    const msgType = event.content?.msgtype;
-    if (msgType === 'm.image') return event.content?.body || 'Image';
-    if (msgType === 'm.file') return `File: ${event.content?.body || event.content?.filename || 'Unknown file'}`;
-    if (msgType === 'm.notice') return event.content?.body || 'Notice';
-    if (msgType === 'm.emote') return event.content?.body || 'Emote';
-    return event.content?.body || '(empty message)';
+    const ec = event.content;
+    const msgType = typeof ec?.msgtype === 'string' ? ec.msgtype : undefined;
+    if (msgType === 'm.image') return strVal(ec?.body, 'Image');
+    if (msgType === 'm.file')
+      return `File: ${strVal(ec?.body) || strVal(ec?.filename) || 'Unknown file'}`;
+    if (msgType === 'm.notice') return strVal(ec?.body, 'Notice');
+    if (msgType === 'm.emote') return strVal(ec?.body, 'Emote');
+    return strVal(ec?.body, '(empty message)');
   };
 
-  useEffect(() => {
-    loadRooms();
-  }, [currentPage]);
-
-  const loadRooms = async () => {
+  const loadRooms = useCallback(async () => {
     try {
       setLoading(true);
       const response = await apiClient.getRooms(currentPage * pageSize, pageSize);
       setRooms(response.rooms || []);
       setTotal(response.total || 0);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load rooms');
+    } catch (err: unknown) {
+      setError(formatError(err));
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentPage, pageSize]);
+
+  useEffect(() => {
+    void loadRooms();
+  }, [loadRooms]);
 
   const filteredRooms = useMemo(() => {
     if (!searchTerm) return rooms;
@@ -164,7 +179,7 @@ export default function RoomsPage() {
       await apiClient.deleteRoom(roomId);
       showToast.success('Room deleted successfully');
       loadRooms();
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     }
   };
@@ -176,7 +191,7 @@ export default function RoomsPage() {
     try {
       const details = await apiClient.getRoomDetails(roomId);
       setRoomDetails(details);
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
       setShowDetailsModal(false);
     } finally {
@@ -192,7 +207,7 @@ export default function RoomsPage() {
     try {
       const messages = await apiClient.getRoomMessages(roomId, undefined, 50);
       setRoomMessages(messages);
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
       setShowMessagesModal(false);
     } finally {
@@ -209,7 +224,7 @@ export default function RoomsPage() {
         ...moreMessages,
         chunk: [...(roomMessages.chunk || []), ...(moreMessages.chunk || [])],
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     } finally {
       setLoadingMessages(false);
@@ -448,7 +463,7 @@ export default function RoomsPage() {
                       <h3 className="text-lg font-semibold mb-3">State Events ({roomDetails.state.length})</h3>
                       <div className="bg-[var(--color-surface)] rounded-lg p-4 max-h-128 overflow-y-auto">
                         <div className="space-y-2">
-                          {roomDetails.state.map((event: any, idx: number) => (
+                          {roomDetails.state.map((event: MatrixRoomEvent, idx: number) => (
                             <div key={idx} className="border-b border-[var(--color-border)] pb-2 last:border-0">
                               <div className="font-semibold text-sm">{event.type}</div>
                               <div className="text-xs text-[var(--color-muted)]">State Key: {event.state_key || '(empty)'}</div>
@@ -500,7 +515,7 @@ export default function RoomsPage() {
                 </div>
               ) : roomMessages?.chunk && roomMessages.chunk.length > 0 ? (
                 <div className="space-y-3">
-                  {roomMessages.chunk.map((message: any, idx: number) => (
+                  {roomMessages.chunk.map((message: MatrixRoomEvent, idx: number) => (
                     <div
                       key={idx}
                       className={`rounded-lg border p-4 ${
@@ -513,38 +528,49 @@ export default function RoomsPage() {
                         <div className="min-w-0">
                           <div className="font-semibold truncate">{message.sender || 'Unknown sender'}</div>
                           <div className="text-xs text-[var(--color-muted)]">
-                            {new Date(message.origin_server_ts).toLocaleString()}
+                            {message.origin_server_ts != null
+                              ? new Date(message.origin_server_ts).toLocaleString()
+                              : '—'}
                           </div>
                         </div>
-                        <Badge variant={getEventTypeVariant(message.type)}>{message.type || 'unknown'}</Badge>
+                        <Badge variant={getEventTypeVariant(message.type ?? 'unknown')}>
+                          {message.type ?? 'unknown'}
+                        </Badge>
                       </div>
 
                       {message.type === 'm.room.message' ? (
                         <div className="space-y-2">
-                          {message.content?.body && (
-                            <p className="whitespace-pre-wrap leading-relaxed">{message.content.body}</p>
+                          {strVal(message.content?.body) !== '' && (
+                            <p className="whitespace-pre-wrap leading-relaxed">
+                              {strVal(message.content?.body)}
+                            </p>
                           )}
-                          {message.content?.formatted_body && (
+                          {strVal(message.content?.formatted_body) !== '' && (
                             <div
                               className="text-sm"
                               dangerouslySetInnerHTML={{
-                                __html: safeFormattedHtml(message.content.formatted_body),
+                                __html: safeFormattedHtml(strVal(message.content?.formatted_body)),
                               }}
                             />
                           )}
                           {message.content?.msgtype === 'm.image' &&
-                            safeMediaUrl(message.content?.url) && (
+                            safeMediaUrl(strVal(message.content?.url)) && (
                             <div>
+                              {/* External Matrix CDN / MXC URLs — skip Next image optimizer */}
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
                               <img
-                                src={safeMediaUrl(message.content.url)!}
-                                alt={message.content.body || 'Image'}
+                                src={safeMediaUrl(strVal(message.content?.url))!}
+                                alt={strVal(message.content?.body, 'Image')}
                                 className="max-w-full rounded border border-[var(--color-border)]"
                               />
                             </div>
                           )}
                           {message.content?.msgtype === 'm.file' && (
                             <div className="text-sm text-[var(--color-muted)]">
-                              File: {message.content.body || message.content.filename || 'Unknown file'}
+                              File:{' '}
+                              {strVal(message.content?.body) ||
+                                strVal(message.content?.filename) ||
+                                'Unknown file'}
                             </div>
                           )}
                         </div>
@@ -554,7 +580,11 @@ export default function RoomsPage() {
                             <span className="font-semibold">Encrypted message</span>
                             <span className="text-[var(--color-muted)]">
                               {' '}
-                              ({formatEncryptionAlgorithm(message.content?.algorithm)})
+                              ({formatEncryptionAlgorithm(
+                                typeof message.content?.algorithm === 'string'
+                                  ? message.content.algorithm
+                                  : undefined,
+                              )})
                             </span>
                           </div>
                           <p className="text-sm text-[var(--color-muted)]">

@@ -17,7 +17,6 @@ import {
   formatContent, 
   validateContent, 
   getSyntaxLanguage,
-  type ConfigFormat 
 } from '@/lib/configFormatter';
 import { useThemeContext } from '@/components/ThemeProvider';
 
@@ -54,8 +53,8 @@ export default function ConfigPage() {
       setLoading(true);
       const data = await apiClient.getConfigs();
       setConfigs(data);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load configs');
+    } catch (err: unknown) {
+      setError(formatError(err));
     } finally {
       setLoading(false);
     }
@@ -79,7 +78,7 @@ export default function ConfigPage() {
           setConfigFormatError(validation.error || 'Invalid format');
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
       setConfigContent(`Error: ${formatError(err)}`);
       setCached(false);
@@ -103,9 +102,9 @@ export default function ConfigPage() {
         setConfigFormatError(result.error || 'Formatting failed');
         showToast.error(result.error || 'Formatting failed');
       }
-    } catch (err: any) {
-      setConfigFormatError(err.message || 'Formatting failed');
-      showToast.error(err.message || 'Formatting failed');
+    } catch (err: unknown) {
+      setConfigFormatError(formatError(err));
+      showToast.error(formatError(err));
     } finally {
       setIsFormatting(false);
     }
@@ -147,7 +146,7 @@ export default function ConfigPage() {
       setIsEditing(false);
       await loadConfigContent(selectedConfig, true);
       showToast.success('Config saved successfully');
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     } finally {
       setIsSaving(false);
@@ -161,7 +160,7 @@ export default function ConfigPage() {
       setShowAddModal(false);
       hasAutoLoadedRef.current = false; // Reset to allow auto-loading new configs
       await loadConfigs();
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     }
   };
@@ -184,7 +183,7 @@ export default function ConfigPage() {
         }
       }
       showToast.success('Config deleted successfully');
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     }
   };

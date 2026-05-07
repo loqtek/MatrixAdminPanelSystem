@@ -9,6 +9,10 @@ export interface FormatResult {
   error?: string;
 }
 
+function messageFromUnknown(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
 /**
  * Detect file format from file path or explicit format
  */
@@ -18,12 +22,12 @@ export function detectFormat(filePath: string, explicitFormat?: string): ConfigF
   }
 
   const ext = filePath.toLowerCase().split('.').pop() || '';
-  
+
   if (['yaml', 'yml'].includes(ext)) return 'yaml';
   if (ext === 'json') return 'json';
   if (ext === 'toml') return 'toml';
   if (['ini', 'conf', 'cfg'].includes(ext)) return 'ini';
-  
+
   return 'text';
 }
 
@@ -68,11 +72,11 @@ export async function formatContent(content: string, format: ConfigFormat): Prom
       default:
         return { formatted: content, valid: true };
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     return {
       formatted: content,
       valid: false,
-      error: error.message || 'Formatting failed',
+      error: messageFromUnknown(error, 'Formatting failed'),
     };
   }
 }
@@ -84,10 +88,10 @@ function validateYaml(content: string): { valid: boolean; error?: string } {
   try {
     yaml.load(content);
     return { valid: true };
-  } catch (error: any) {
+  } catch (error: unknown) {
     return {
       valid: false,
-      error: error.message || 'Invalid YAML',
+      error: messageFromUnknown(error, 'Invalid YAML'),
     };
   }
 }
@@ -97,7 +101,6 @@ function validateYaml(content: string): { valid: boolean; error?: string } {
  */
 function formatYaml(content: string): FormatResult {
   try {
-    // First validate
     const validation = validateYaml(content);
     if (!validation.valid) {
       return {
@@ -107,7 +110,6 @@ function formatYaml(content: string): FormatResult {
       };
     }
 
-    // Parse and stringify with proper formatting
     const parsed = yaml.load(content);
     const formatted = yaml.dump(parsed, {
       indent: 2,
@@ -122,11 +124,11 @@ function formatYaml(content: string): FormatResult {
       formatted: formatted.trim(),
       valid: true,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     return {
       formatted: content,
       valid: false,
-      error: error.message || 'YAML formatting failed',
+      error: messageFromUnknown(error, 'YAML formatting failed'),
     };
   }
 }
@@ -136,10 +138,8 @@ function formatYaml(content: string): FormatResult {
  */
 async function formatJson(content: string): Promise<FormatResult> {
   try {
-    // Parse to validate
     const parsed = JSON.parse(content);
-    
-    // Format with prettier (async in v3+)
+
     const formatted = await prettier.format(JSON.stringify(parsed), {
       parser: 'json',
       printWidth: 100,
@@ -151,11 +151,11 @@ async function formatJson(content: string): Promise<FormatResult> {
       formatted: formatted.trim(),
       valid: true,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     return {
       formatted: content,
       valid: false,
-      error: error.message || 'Invalid JSON',
+      error: messageFromUnknown(error, 'Invalid JSON'),
     };
   }
 }
@@ -164,31 +164,16 @@ async function formatJson(content: string): Promise<FormatResult> {
  * Format TOML content (basic - prettier doesn't support TOML well)
  */
 function formatToml(content: string): FormatResult {
-  // TOML formatting is complex, for now just validate basic structure
-  // In a real implementation, you'd use a TOML parser
   try {
-    // Basic validation - check for common TOML patterns
-    const lines = content.split('\n');
-    let inTable = false;
-    let bracketCount = 0;
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-        bracketCount++;
-      }
-    }
-
-    // Simple validation passed
     return {
       formatted: content,
       valid: true,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     return {
       formatted: content,
       valid: false,
-      error: error.message || 'TOML validation failed',
+      error: messageFromUnknown(error, 'TOML validation failed'),
     };
   }
 }
@@ -206,10 +191,8 @@ function formatIni(content: string): FormatResult {
       const line = lines[i];
       const trimmed = line.trim();
 
-      // Skip empty lines at the start
       if (formatted.length === 0 && !trimmed) continue;
 
-      // Section header
       if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
         if (lastSection && formatted[formatted.length - 1] !== '') {
           formatted.push('');
@@ -219,13 +202,11 @@ function formatIni(content: string): FormatResult {
         continue;
       }
 
-      // Comment
       if (trimmed.startsWith(';') || trimmed.startsWith('#')) {
         formatted.push(line);
         continue;
       }
 
-      // Key-value pair
       if (trimmed.includes('=')) {
         const [key, ...valueParts] = trimmed.split('=');
         const value = valueParts.join('=');
@@ -234,7 +215,6 @@ function formatIni(content: string): FormatResult {
         continue;
       }
 
-      // Empty line
       if (!trimmed) {
         if (formatted[formatted.length - 1] !== '') {
           formatted.push('');
@@ -242,11 +222,9 @@ function formatIni(content: string): FormatResult {
         continue;
       }
 
-      // Other content
       formatted.push(line);
     }
 
-    // Remove trailing empty lines
     while (formatted.length > 0 && formatted[formatted.length - 1] === '') {
       formatted.pop();
     }
@@ -255,11 +233,11 @@ function formatIni(content: string): FormatResult {
       formatted: formatted.join('\n'),
       valid: true,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     return {
       formatted: content,
       valid: false,
-      error: error.message || 'INI formatting failed',
+      error: messageFromUnknown(error, 'INI formatting failed'),
     };
   }
 }
@@ -280,22 +258,20 @@ export function validateContent(content: string, format: ConfigFormat): { valid:
         try {
           JSON.parse(content);
           return { valid: true };
-        } catch (error: any) {
-          return { valid: false, error: error.message || 'Invalid JSON' };
+        } catch (error: unknown) {
+          return { valid: false, error: messageFromUnknown(error, 'Invalid JSON') };
         }
       case 'toml':
       case 'ini':
       case 'conf':
-        // Basic validation - just check if it's not completely broken
         return { valid: true };
       default:
         return { valid: true };
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     return {
       valid: false,
-      error: error.message || 'Validation failed',
+      error: messageFromUnknown(error, 'Validation failed'),
     };
   }
 }
-

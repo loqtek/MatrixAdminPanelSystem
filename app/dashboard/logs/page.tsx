@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { apiClient, Log } from '@/lib/api';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/Button';
@@ -62,7 +62,9 @@ function parseLogLine(line: string, preset: ParsePreset, index: number): ParsedL
         raw: line,
         timestamp,
         logger,
-        level: (KNOWN_LEVELS.includes(level as any) ? level : 'UNKNOWN') as LogLevelFilter,
+        level: (KNOWN_LEVELS as readonly string[]).includes(level)
+          ? (level as LogLevelFilter)
+          : 'UNKNOWN',
         message,
       };
     }
@@ -345,18 +347,55 @@ export default function LogsPage() {
     );
   }, [parsedEntries]);
 
-  useEffect(() => {
-    loadLogs();
+  const loadLogs = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await apiClient.getLogs();
+      setLogs(data);
+    } catch (err: unknown) {
+      setError(formatError(err));
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  const loadLogContent = useCallback(
+    async (log: Log, forceRefresh = false) => {
+      try {
+        const shouldUpdateState = !selectedLog || selectedLog.id !== log.id;
+        if (shouldUpdateState) {
+          setSelectedLog(log);
+          setLines(log.default_lines || 100);
+          setAutoReload(log.auto_reload || false);
+        }
+        const linesToLoad = shouldUpdateState ? (log.default_lines || 100) : lines;
+        setLogContent('Loading...');
+        const data = await apiClient.getLogContent(log.id, linesToLoad, forceRefresh);
+        const content = data.content || '';
+        const reversedContent = content.split('\n').reverse().join('\n');
+        setLogContent(reversedContent);
+        setCached(data.cached || false);
+        setLogFetchVersion((v) => v + 1);
+      } catch (err: unknown) {
+        showToast.error(formatError(err));
+        setLogContent(`Error: ${formatError(err)}`);
+        setCached(false);
+      }
+    },
+    [lines, selectedLog],
+  );
+
+  useEffect(() => {
+    void loadLogs();
+  }, [loadLogs]);
 
   // Auto-load first log when logs are loaded
   useEffect(() => {
     if (logs.length > 0 && !selectedLog && !loading && !hasAutoLoadedRef.current) {
       hasAutoLoadedRef.current = true;
-      loadLogContent(logs[0]);
+      void loadLogContent(logs[0]);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [logs.length, loading, selectedLog]);
+  }, [logs, logs.length, loadLogContent, loading, selectedLog]);
 
   useEffect(() => {
     return () => {
@@ -370,7 +409,7 @@ export default function LogsPage() {
     if (autoReload && selectedLog) {
       const interval = selectedLog.reload_interval || 5;
       autoReloadIntervalRef.current = setInterval(() => {
-        loadLogContent(selectedLog, true);
+        void loadLogContent(selectedLog, true);
       }, interval * 1000);
     } else {
       if (autoReloadIntervalRef.current) {
@@ -384,7 +423,7 @@ export default function LogsPage() {
         clearInterval(autoReloadIntervalRef.current);
       }
     };
-  }, [autoReload, selectedLog]);
+  }, [autoReload, loadLogContent, selectedLog]);
 
   useEffect(() => {
     if (!selectedLog) return;
@@ -394,7 +433,7 @@ export default function LogsPage() {
       return;
     }
     setParsePreset('none');
-  }, [selectedLog?.id]);
+  }, [selectedLog]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -410,42 +449,6 @@ export default function LogsPage() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
-
-  const loadLogs = async () => {
-    try {
-      setLoading(true);
-      const data = await apiClient.getLogs();
-      setLogs(data);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load logs');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadLogContent = async (log: Log, forceRefresh = false) => {
-    try {
-      const shouldUpdateState = !selectedLog || selectedLog.id !== log.id;
-      if (shouldUpdateState) {
-        setSelectedLog(log);
-        setLines(log.default_lines || 100);
-        setAutoReload(log.auto_reload || false);
-      }
-      const linesToLoad = shouldUpdateState ? (log.default_lines || 100) : lines;
-      setLogContent('Loading...');
-      const data = await apiClient.getLogContent(log.id, linesToLoad, forceRefresh);
-      // Reverse the log lines so newest appear at the top
-      const content = data.content || '';
-      const reversedContent = content.split('\n').reverse().join('\n');
-      setLogContent(reversedContent);
-      setCached(data.cached || false);
-      setLogFetchVersion((v) => v + 1);
-    } catch (err: any) {
-      showToast.error(formatError(err));
-      setLogContent(`Error: ${formatError(err)}`);
-      setCached(false);
-    }
-  };
 
   const copyVisibleLogs = async () => {
     try {
@@ -473,7 +476,7 @@ export default function LogsPage() {
       setShowAddModal(false);
       hasAutoLoadedRef.current = false;
       await loadLogs();
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     }
   };
@@ -489,7 +492,7 @@ export default function LogsPage() {
           await loadLogContent(updatedLog, true);
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     }
   };
@@ -512,7 +515,7 @@ export default function LogsPage() {
         }
       }
       showToast.success('Log deleted successfully');
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast.error(formatError(err));
     }
   };

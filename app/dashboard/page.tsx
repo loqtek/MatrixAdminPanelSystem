@@ -1,12 +1,11 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { apiClient, DashboardStats, UserMediaStats, DatabaseRoomStats } from '@/lib/api';
 import { Header } from '@/components/layout/Header';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { Badge } from '@/components/ui/Badge';
 import { 
   BarChart, 
   Bar, 
@@ -17,12 +16,7 @@ import {
   YAxis, 
   CartesianGrid, 
   Tooltip, 
-  Legend, 
   ResponsiveContainer,
-  LineChart,
-  Line,
-  AreaChart,
-  Area
 } from 'recharts';
 import { showToast, formatError } from '@/lib/toast';
 
@@ -54,48 +48,28 @@ export default function DashboardPage() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [mediaStats, setMediaStats] = useState<UserMediaStats[]>([]);
   const [roomSizeStats, setRoomSizeStats] = useState<DatabaseRoomStats[]>([]);
-  const [loadingMedia, setLoadingMedia] = useState(false);
-  const [loadingRoomSizes, setLoadingRoomSizes] = useState(false);
 
-  useEffect(() => {
-    loadStats();
-    loadMediaStats();
-    loadRoomSizeStats();
-    let interval: NodeJS.Timeout | null = null;
-    if (autoRefresh) {
-      interval = setInterval(() => {
-        loadStats();
-        loadMediaStats();
-        loadRoomSizeStats();
-      }, 30000); // Refresh every 30 seconds
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [autoRefresh, timeFilter]);
-
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     try {
       setLoading(true);
       const data = await apiClient.getDashboardStats();
       setStats(data);
       setLastUpdated(new Date());
       setError('');
-    } catch (err: any) {
+    } catch (err: unknown) {
       const errorMsg = formatError(err);
       setError(errorMsg);
       showToast.error(errorMsg);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const loadMediaStats = async () => {
+  const loadMediaStats = useCallback(async () => {
     try {
-      setLoadingMedia(true);
       const now = Date.now();
       let fromTs: number | undefined;
-      
+
       if (timeFilter === '7d') {
         fromTs = now - (7 * 24 * 60 * 60 * 1000);
       } else if (timeFilter === '30d') {
@@ -111,29 +85,39 @@ export default function DashboardPage() {
         'b',
         fromTs,
         undefined,
-        undefined
+        undefined,
       );
       setMediaStats(response.users || []);
-    } catch (err: any) {
-      // Silently fail for media stats - not all servers support it
+    } catch (err: unknown) {
       console.error('Failed to load media stats:', err);
-    } finally {
-      setLoadingMedia(false);
     }
-  };
+  }, [timeFilter]);
 
-  const loadRoomSizeStats = async () => {
+  const loadRoomSizeStats = useCallback(async () => {
     try {
-      setLoadingRoomSizes(true);
       const response = await apiClient.getDatabaseRoomStatistics();
       setRoomSizeStats(response.rooms || []);
-    } catch (err: any) {
-      // Silently fail for room size stats - not all servers support it
+    } catch (err: unknown) {
       console.error('Failed to load room size stats:', err);
-    } finally {
-      setLoadingRoomSizes(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void loadStats();
+    void loadMediaStats();
+    void loadRoomSizeStats();
+    let interval: ReturnType<typeof setInterval> | null = null;
+    if (autoRefresh) {
+      interval = setInterval(() => {
+        void loadStats();
+        void loadMediaStats();
+        void loadRoomSizeStats();
+      }, 30000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [autoRefresh, loadMediaStats, loadRoomSizeStats, loadStats, timeFilter]);
 
   const userTypeData = useMemo(() => {
     if (!stats?.users_by_type) return [];
@@ -512,7 +496,7 @@ export default function DashboardPage() {
                   <XAxis type="number" stroke="var(--color-foreground)" />
                   <YAxis dataKey="name" type="category" width={100} stroke="var(--color-foreground)" />
                   <Tooltip 
-                    formatter={(value: any) => typeof value === 'number' ? formatBytes(value) : String(value || '')}
+                    formatter={(value) => (typeof value === 'number' ? formatBytes(value) : String(value ?? ''))}
                     contentStyle={{
                       backgroundColor: 'var(--color-surface)',
                       border: '1px solid var(--color-border)',
@@ -539,7 +523,7 @@ export default function DashboardPage() {
                   <XAxis type="number" stroke="var(--color-foreground)" />
                   <YAxis dataKey="name" type="category" width={100} stroke="var(--color-foreground)" />
                   <Tooltip 
-                    formatter={(value: any) => typeof value === 'number' ? formatBytes(value) : String(value || '')}
+                    formatter={(value) => (typeof value === 'number' ? formatBytes(value) : String(value ?? ''))}
                     contentStyle={{
                       backgroundColor: 'var(--color-surface)',
                       border: '1px solid var(--color-border)',
