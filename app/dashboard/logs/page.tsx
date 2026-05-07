@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef, useMemo } from 'react';
 import { apiClient, Log } from '@/lib/api';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/Button';
@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { showToast, formatError } from '@/lib/toast';
+import { useVirtualizer, measureElement } from '@tanstack/react-virtual';
 
 type ParsePreset = 'none' | 'matrix-synapse';
 type LogLevelFilter = 'all' | 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL' | 'UNKNOWN';
@@ -88,11 +89,201 @@ function parseLogLine(line: string, preset: ParsePreset, index: number): ParsedL
   };
 }
 
-function levelBadgeVariant(level: LogLevelFilter): 'default' | 'success' | 'warning' | 'danger' {
-  if (level === 'ERROR' || level === 'CRITICAL') return 'danger';
-  if (level === 'WARNING') return 'warning';
-  if (level === 'INFO') return 'success';
-  return 'default';
+/** Compact level pill (parsed view) */
+function levelPillClass(level: LogLevelFilter): string {
+  if (level === 'ERROR' || level === 'CRITICAL') {
+    return 'bg-red-500/12 text-red-700 dark:text-red-300 border border-red-500/20';
+  }
+  if (level === 'WARNING') {
+    return 'bg-amber-500/12 text-amber-800 dark:text-amber-300 border border-amber-500/20';
+  }
+  if (level === 'INFO') {
+    return 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border border-emerald-500/15';
+  }
+  if (level === 'DEBUG') {
+    return 'bg-sky-500/10 text-sky-800 dark:text-sky-300 border border-sky-500/15';
+  }
+  return 'bg-[color-mix(in_srgb,var(--color-muted)_12%,transparent)] text-[var(--color-muted)] border border-[var(--color-border)]/60';
+}
+
+function formatLevelLabel(level: LogLevelFilter): string {
+  switch (level) {
+    case 'DEBUG':
+      return 'DBG';
+    case 'INFO':
+      return 'INF';
+    case 'WARNING':
+      return 'WRN';
+    case 'ERROR':
+      return 'ERR';
+    case 'CRITICAL':
+      return 'CRIT';
+    default:
+      return '·';
+  }
+}
+
+function messageWithHighlights(text: string) {
+  if (!text) return null;
+  const parts = text.split(/(https?:\/\/[^\s<>"':]+)/gi);
+  return parts.map((part, i) => {
+    if (/^https?:\/\//i.test(part)) {
+      let safe = part;
+      try {
+        const u = new URL(part);
+        if (u.protocol === 'git:' || u.protocol === 'javascript:' || u.protocol === 'data:' || u.protocol === 'vbscript:')
+          safe = '';
+        else safe = u.toString();
+      } catch {
+        safe = '';
+      }
+      if (!safe) return <span key={i}>{part}</span>;
+      return (
+        <a
+          key={i}
+          href={safe}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sky-600 dark:text-sky-400 underline decoration-sky-500/35 underline-offset-1"
+        >
+          {part}
+        </a>
+      );
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
+/** Parsed rows: virtualized; owns scroll container so virtualizer always gets a real scroll rect. */
+function ParsedLogVirtualList({
+  entries,
+  scrollResetKey,
+  ariaLabel,
+}: {
+  entries: ParsedLogEntry[];
+  scrollResetKey: string;
+  ariaLabel: string;
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  const rowVirtualizer = useVirtualizer({
+    count: entries.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 24,
+    overscan: 18,
+    measureElement,
+  });
+
+  useLayoutEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+  }, [scrollResetKey]);
+
+  return (
+    <div
+      ref={scrollRef}
+      className="log-scrollbar min-h-0 min-h-[min(50dvh,28rem)] flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-background)]"
+      role="region"
+      aria-label={ariaLabel}
+      tabIndex={0}
+    >
+      <div className="relative w-full" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
+        {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+          const entry = entries[virtualRow.index];
+          return (
+            <div
+              key={entry.id}
+              data-index={virtualRow.index}
+              ref={rowVirtualizer.measureElement}
+              className="absolute left-0 top-0 flex w-full items-start gap-3 border-b border-[color-mix(in_srgb,var(--color-border)_45%,transparent)] px-3 py-px font-mono text-[11px] leading-[1.35] hover:bg-[color-mix(in_srgb,var(--color-foreground)_3%,transparent)]"
+              style={{ transform: `translateY(${virtualRow.start}px)` }}
+              title={entry.raw}
+            >
+              <span
+                className={`w-[8.75rem] flex-shrink-0 truncate tabular-nums ${
+                  entry.timestamp
+                    ? 'text-emerald-700/90 dark:text-emerald-400/90'
+                    : 'text-[var(--color-muted)]'
+                }`}
+                title={entry.timestamp ?? entry.raw}
+              >
+                {entry.timestamp ?? '—'}
+              </span>
+              <span
+                className={`w-[8.25rem] flex-shrink-0 truncate ${
+                  entry.logger ? 'text-violet-600 dark:text-violet-400/95' : 'text-[var(--color-muted)]'
+                }`}
+                title={entry.logger ?? undefined}
+              >
+                {entry.logger ?? '—'}
+              </span>
+              <span className="flex w-[2.75rem] flex-shrink-0 justify-center pt-px" title={entry.level}>
+                <span
+                  className={`inline-flex min-w-[2rem] justify-center rounded px-1 py-0 text-[9px] font-semibold uppercase tracking-tight tabular-nums ${levelPillClass(entry.level)}`}
+                >
+                  {formatLevelLabel(entry.level)}
+                </span>
+              </span>
+              <span className="min-w-0 flex-1 text-[var(--color-foreground)]/95 [overflow-wrap:anywhere] whitespace-pre-wrap">
+                {messageWithHighlights(entry.message)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Raw lines: virtualized; owns scroll container. */
+function RawLogVirtualList({
+  lines,
+  scrollResetKey,
+  ariaLabel,
+}: {
+  lines: string[];
+  scrollResetKey: string;
+  ariaLabel: string;
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  const rowVirtualizer = useVirtualizer({
+    count: lines.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 20,
+    overscan: 28,
+    measureElement,
+  });
+
+  useLayoutEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+  }, [scrollResetKey]);
+
+  return (
+    <div
+      ref={scrollRef}
+      className="log-scrollbar min-h-0 min-h-[min(50dvh,28rem)] flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-background)]"
+      role="region"
+      aria-label={ariaLabel}
+      tabIndex={0}
+    >
+      <div
+        className="relative w-full font-mono text-[0.875rem] leading-normal text-[var(--color-foreground)]"
+        style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+      >
+        {rowVirtualizer.getVirtualItems().map((virtualRow) => (
+          <div
+            key={virtualRow.key}
+            data-index={virtualRow.index}
+            ref={rowVirtualizer.measureElement}
+            className="absolute left-0 top-0 w-full border-b border-[color-mix(in_srgb,var(--color-border)_40%,transparent)] px-3 py-px [overflow-wrap:anywhere] whitespace-pre-wrap"
+            style={{ transform: `translateY(${virtualRow.start}px)` }}
+          >
+            {lines[virtualRow.index]}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function LogsPage() {
@@ -113,8 +304,8 @@ export default function LogsPage() {
   const [viewMode, setViewMode] = useState<LogViewMode>('parsed');
   const autoReloadIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const hasAutoLoadedRef = useRef(false);
-  const logContentRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const [logFetchVersion, setLogFetchVersion] = useState(0);
 
   const parsedEntries = useMemo(() => {
     if (!logContent || logContent === 'Loading...' || logContent.startsWith('Error:')) return [];
@@ -141,6 +332,8 @@ export default function LogsPage() {
       return haystack.includes(normalizedSearch);
     });
   }, [parsedEntries, levelFilter, searchQuery, searchScope, matchCase]);
+
+  const rawLogLines = useMemo(() => filteredEntries.map((e) => e.raw), [filteredEntries]);
 
   const levelCounts = useMemo(() => {
     return parsedEntries.reduce<Record<LogLevelFilter, number>>(
@@ -246,13 +439,7 @@ export default function LogsPage() {
       const reversedContent = content.split('\n').reverse().join('\n');
       setLogContent(reversedContent);
       setCached(data.cached || false);
-      
-      // Scroll to top to show newest lines
-      setTimeout(() => {
-        if (logContentRef.current) {
-          logContentRef.current.scrollTop = 0;
-        }
-      }, 0);
+      setLogFetchVersion((v) => v + 1);
     } catch (err: any) {
       showToast.error(formatError(err));
       setLogContent(`Error: ${formatError(err)}`);
@@ -339,7 +526,7 @@ export default function LogsPage() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh)]">
+    <div className="flex min-h-0 flex-1 flex-col">
       <Header
         title="Log Files"
         actions={
@@ -356,8 +543,8 @@ export default function LogsPage() {
       )}
 
       {/* Log Files Selector - Top Section */}
-      <Card className="mb-4 flex-shrink-0">
-        <CardContent className="p-4">
+      <Card className="mb-3 flex-shrink-0">
+        <CardContent className="p-3">
           <div className="flex items-center gap-2 overflow-x-auto pb-2">
             {logs.map((log) => (
               <button
@@ -388,12 +575,14 @@ export default function LogsPage() {
 
       {/* Log Content Viewer - Bottom Section */}
       {selectedLog ? (
-        <Card className="flex-1 flex flex-col min-h-0 overflow-hidden">
-          <div className="p-4 border-b border-[var(--color-border)] bg-[var(--color-surface)] flex-shrink-0">
-            <div className="flex items-center justify-between mb-3">
+        <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex-shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+            <div className="mb-3 flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-bold text-[var(--color-foreground)]">{selectedLog.name}</h2>
-                <p className="text-xs text-[var(--color-muted)] mt-1 font-mono">{selectedLog.file_path}</p>
+                <h2 id={`log-viewer-title-${selectedLog.id}`} className="text-lg font-bold text-[var(--color-foreground)]">
+                  {selectedLog.name}
+                </h2>
+                <p className="mt-1 font-mono text-xs text-[var(--color-muted)]">{selectedLog.file_path}</p>
               </div>
               <div className="flex items-center gap-2">
                 {cached && <Badge variant="warning">Cached</Badge>}
@@ -557,70 +746,68 @@ export default function LogsPage() {
             </div>
           </div>
 
-          <div 
-            ref={logContentRef}
-            className="log-scrollbar flex-1 overflow-auto bg-[var(--color-background)]" 
-            style={{ minHeight: 0 }}
+          <section
+            className="flex min-h-[min(72dvh,52rem)] flex-1 flex-col bg-[var(--color-background)]"
+            aria-labelledby={`log-viewer-title-${selectedLog.id}`}
           >
             {logContent === 'Loading...' ? (
-              <div className="flex items-center justify-center h-full text-[var(--color-muted)]">
+              <div className="flex flex-1 items-center justify-center py-16 text-[var(--color-muted)]">
                 <LoadingSpinner size="lg" />
               </div>
-            ) : logContent ? (
+            ) : logContent && !logContent.startsWith('Error:') ? (
               viewMode === 'raw' ? (
-                <pre 
-                  className={`
-                    log-scrollbar h-full p-4 text-sm font-mono text-[var(--color-foreground)] overflow-auto whitespace-pre
-                  `}
-                  style={{ 
-                    fontFamily: 'monospace',
-                    lineHeight: '1.6',
-                    background: 'var(--color-background)',
-                  }}
-                >
-                  {filteredEntries.map((entry) => entry.raw).join('\n')}
-                </pre>
+                <div className="flex min-h-0 flex-1 flex-col p-3 pt-2">
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-sm">
+                    {rawLogLines.length === 0 ? (
+                      <div className="flex flex-1 items-center justify-center p-6 text-center text-sm text-[var(--color-muted)]">
+                        No matching logs for current filters.
+                      </div>
+                    ) : (
+                      <RawLogVirtualList
+                        lines={rawLogLines}
+                        scrollResetKey={`${selectedLog.id}-${logFetchVersion}`}
+                        ariaLabel={`Raw log lines for ${selectedLog.name}`}
+                      />
+                    )}
+                  </div>
+                </div>
               ) : (
-                <div className="p-3 space-y-2">
-                  <div className="flex items-center justify-between text-xs text-[var(--color-muted)] px-1">
-                    <span>Showing {filteredEntries.length} of {parsedEntries.length} lines</span>
+                <div className="flex min-h-0 flex-1 flex-col p-3 pt-2">
+                  <div className="mb-1.5 flex flex-shrink-0 items-center justify-between px-1 text-[11px] text-[var(--color-muted)]">
+                    <span>
+                      Showing {filteredEntries.length} of {parsedEntries.length} lines
+                    </span>
                     <span>Preset: {parsePreset === 'matrix-synapse' ? 'Matrix Synapse' : 'Raw / generic'}</span>
                   </div>
                   {filteredEntries.length === 0 ? (
-                    <div className="p-6 rounded-lg border border-dashed border-[var(--color-border)] text-center text-[var(--color-muted)] text-sm">
+                    <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-border text-sm text-[var(--color-muted)]">
                       No matching logs for current filters.
                     </div>
                   ) : (
-                    filteredEntries.map((entry) => (
-                      <div
-                        key={entry.id}
-                        className="log-scrollbar rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 overflow-x-auto"
-                      >
-                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          {entry.timestamp && (
-                            <span className="text-xs font-mono text-[var(--color-muted)]">{entry.timestamp}</span>
-                          )}
-                          {entry.logger && (
-                            <Badge variant="default" className="text-xs">
-                              {entry.logger}
-                            </Badge>
-                          )}
-                          <Badge variant={levelBadgeVariant(entry.level)} className="text-xs">
-                            {entry.level}
-                          </Badge>
-                        </div>
-                        <pre className="text-sm font-mono text-[var(--color-foreground)] whitespace-pre">
-                          {entry.raw}
-                        </pre>
+                    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-sm">
+                      <div className="flex flex-shrink-0 items-baseline gap-3 border-b border-border bg-[color-mix(in_srgb,var(--color-surface)_94%,var(--color-border)_6%)] px-3 py-1 text-[10px] font-medium uppercase tracking-wide text-[var(--color-muted)]">
+                        <span className="w-[8.75rem] shrink-0">Time</span>
+                        <span className="w-[8.25rem] shrink-0">Logger</span>
+                        <span className="w-[2.75rem] shrink-0 text-center">Lvl</span>
+                        <span className="min-w-0 flex-1">Message</span>
                       </div>
-                    ))
+                      <ParsedLogVirtualList
+                        entries={filteredEntries}
+                        scrollResetKey={`${selectedLog.id}-${logFetchVersion}`}
+                        ariaLabel={`Parsed log lines for ${selectedLog.name}`}
+                      />
+                    </div>
                   )}
                 </div>
               )
+            ) : logContent?.startsWith('Error:') ? (
+              <div className="text-red-600 dark:text-red-400 m-4 rounded-lg border border-red-300/50 bg-red-50/80 p-4 text-sm dark:bg-red-950/30 dark:border-red-800/50">
+                {logContent}
+              </div>
             ) : (
-              <div className="flex items-center justify-center h-full text-[var(--color-muted)]">No log content loaded</div>
+              <div className="flex flex-1 items-center justify-center text-[var(--color-muted)]">No log content loaded</div>
             )}
-          </div>
+          </section>
         </Card>
       ) : (
         <Card className="flex-1 flex items-center justify-center">
