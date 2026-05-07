@@ -1,3 +1,8 @@
+# Local tooling
+.cursor/
+.turbo/
+.vercel/
+
 # Dependencies
 node_modules/
 .next/

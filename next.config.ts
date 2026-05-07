@@ -6,6 +6,10 @@ const backendInternalUrl =
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  poweredByHeader: false,
+  experimental: {
+    optimizePackageImports: ['lucide-react', 'recharts'],
+  },
   async rewrites() {
     const base = backendInternalUrl.replace(/\/$/, "");
     return [

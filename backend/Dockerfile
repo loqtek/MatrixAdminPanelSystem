@@ -1,49 +1,39 @@
 # Backend Dockerfile for Matrix Admin Panel System (MAPS)
-# This container runs the FastAPI backend server
+# Multi-stage build: keep compilers and build deps out of the final image.
 
-# Use Python 3.12 slim image for smaller size
-FROM python:3.12-slim
+FROM python:3.12-slim AS builder
 
-# Set working directory inside container
 WORKDIR /app
 
-# Set environment variables
-# - PYTHONUNBUFFERED: Ensures Python output is sent straight to terminal
-# - PYTHONDONTWRITEBYTECODE: Prevents Python from writing .pyc files
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
+ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies
-# - Required for building Python packages and database drivers
-RUN apt-get update && apt-get install -y \
-    gcc \
-    postgresql-client \
-    && rm -rf /var/lib/apt/lists/*
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy requirements file first (for better Docker layer caching)
-# This allows Docker to cache the pip install step if requirements don't change
 COPY requirements.txt .
-
-# Install Python dependencies
+# Wheels cover these deps on linux/amd64 & linux/arm64; add gcc in this stage only if a wheel is missing.
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the entire backend application code
+# --- runtime ---
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH"
+
+COPY --from=builder /opt/venv /opt/venv
+
 COPY . .
 
-# Expose port 8000 (FastAPI default port)
-# This is the port the backend API will listen on
 EXPOSE 8000
 
-# Health check to ensure the container is running properly
-# Checks the /health endpoint every 30 seconds
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+HEALTHCHECK --interval=45s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')" || exit 1
 
-# Run the FastAPI application using uvicorn
-# - host 0.0.0.0: Listen on all network interfaces (required for Docker)
-# - port 8000: The port we exposed above
-# - app.main:app: The FastAPI app instance in app/main.py
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-
+# Single worker keeps memory predictable for small hosts; scale via replicas if needed.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--timeout-keep-alive", "5"]
