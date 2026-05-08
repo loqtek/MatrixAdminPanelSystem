@@ -183,7 +183,7 @@ function ParsedLogVirtualList({
   return (
     <div
       ref={scrollRef}
-      className="log-scrollbar min-h-0 min-h-[min(50dvh,28rem)] flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-background)]"
+      className="log-scrollbar min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-background)]"
       role="region"
       aria-label={ariaLabel}
       tabIndex={0}
@@ -263,7 +263,7 @@ function RawLogVirtualList({
   return (
     <div
       ref={scrollRef}
-      className="log-scrollbar min-h-0 min-h-[min(50dvh,28rem)] flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-background)]"
+      className="log-scrollbar min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-background)]"
       role="region"
       aria-label={ariaLabel}
       tabIndex={0}
@@ -529,7 +529,7 @@ export default function LogsPage() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <Header
         title="Log Files"
         actions={
@@ -750,7 +750,7 @@ export default function LogsPage() {
           </div>
 
           <section
-            className="flex min-h-[min(72dvh,52rem)] flex-1 flex-col bg-[var(--color-background)]"
+            className="flex min-h-0 flex-1 flex-col bg-[var(--color-background)]"
             aria-labelledby={`log-viewer-title-${selectedLog.id}`}
           >
             {logContent === 'Loading...' ? (
@@ -813,7 +813,7 @@ export default function LogsPage() {
           </section>
         </Card>
       ) : (
-        <Card className="flex-1 flex items-center justify-center">
+        <Card className="flex min-h-0 flex-1 items-center justify-center">
           <div className="text-center text-[var(--color-muted)]">
             <p className="text-lg mb-2">No log selected</p>
             <p className="text-sm">Select a log file from above to view its contents</p>

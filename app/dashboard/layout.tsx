@@ -25,14 +25,14 @@ export default function DashboardLayout({
   }
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex h-screen min-h-0 overflow-hidden bg-background">
       <Sidebar
         onLogout={logout}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
       />
-      <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {/* min-h-0 lets nested flex pages (e.g. logs) fill viewport height instead of only growing with content */}
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {/* min-h-0 + h-screen parent: child can flex-1 to viewport; pages scroll here unless they use internal scroll (logs) */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overflow-x-hidden p-6 md:p-8">
           {children}
         </div>
